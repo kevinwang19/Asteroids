@@ -1,0 +1,240 @@
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.geom.AffineTransform;
+import java.util.ArrayList;
+
+public class Ship extends VectorSprite{
+	public final double MAX_SPEED = 6;
+	public final double ENGINE_THRUST = 0.1;
+	public ArrayList <Bullet> bulletList;
+	public final int RATE_OF_FIRE = 1; //20
+	final int MAX_HEALTH = 1000000; //5
+	int health = MAX_HEALTH;
+	int timeSinceLastFire = RATE_OF_FIRE;
+	boolean isActive = true;
+	boolean flickering = false;
+	int hitFlicker = 0;
+	int flickerTime = 0; //200
+	int sprayCount = 1000; //10
+	int points = 0;
+	int flameRow = 0;
+	AudioPlayer firePlayer;
+	final int FLAME_WIDTH = 4;
+	final int FLAME_HEIGHT = 8;
+	final int FLAME_DELAY = 0; //3
+	int flameCounter = 0;
+	boolean engineOn = false;
+	public Ship(double x, double y) {
+		super(x, y, Color.GREEN);
+		bulletList = new ArrayList <Bullet>();
+		firePlayer = new AudioPlayer("shipFire.wav");
+		
+		//adding points and setting the center
+		this.addPoint(0, 50);
+		this.addPoint(20, 0);
+		this.addPoint(40, 50);
+		this.addPoint(20, 35);
+		centerX = 20;
+		centerY = 25;
+		angle = 0.02;
+	}
+	public void move() {
+		double totalSpeedSq = xSpeed*xSpeed + ySpeed*ySpeed;
+		if(totalSpeedSq > MAX_SPEED*MAX_SPEED) {
+			double ratio = MAX_SPEED / Math.sqrt(totalSpeedSq);
+			xSpeed *= ratio;
+			ySpeed *= ratio;
+		}
+		
+		super.move();
+	}
+	public void update(ArrayList <Asteroid> rockList) {
+		super.update();
+		if(!flickering) {
+			for(Asteroid rock: rockList) {
+				if(hitAsteroid(rock)) {
+					health -= rock.damageCount;
+					flickering = true;
+					hitFlicker = 0;
+					rock.crashPlayer.play();
+				}
+			}
+		}
+		else {
+			hitFlicker++;
+			if(hitFlicker >= flickerTime) {
+				flickering = false;
+				hitFlicker = 0;
+			}
+		}
+		for(Bullet bullet: bulletList) {
+			bullet.update();
+		}
+		for(int i = 0; i < bulletList.size(); i++) {
+			Bullet b = bulletList.get(i);
+			if(b.xDist*b.xDist + b.yDist*b.yDist > b.MAXIMUM_DISTANCE*b.MAXIMUM_DISTANCE) {
+				bulletList.remove(b);
+				i--;
+			}
+			else {
+				for(int a = 0; a < rockList.size(); a++) {
+					Asteroid rock = rockList.get(a);
+					if(b.circleCollision(rock)) {
+						this.points += rock.pointValue;
+						bulletList.remove(b);
+						rockList.remove(rock);
+						i--;
+						rock.breakPlayer.play();
+						if(rock.sizeLevel < rock.MAXIMUM_LEVEL){
+							for(int numRocks = 0; numRocks < Asteroid.EXPANSION_COUNT; numRocks++) {
+								Asteroid newRock = new Asteroid(rock.xLocation, rock.yLocation, rock.sizeLevel + 1);
+								rockList.add(newRock);
+							}
+						}
+					    break;
+					}
+				}
+			}
+		}
+		timeSinceLastFire++;
+	}
+	public void fire(double angle) {
+		double firingLocationX = xLocation + centerX + centerY*Math.cos(angle - (Math.PI / 2));
+		double firingLocationY = yLocation + centerY + centerY*Math.sin(angle - (Math.PI / 2));
+		bulletList.add(new Bullet(firingLocationX, firingLocationY, angle, xSpeed, ySpeed));
+	}
+	public void shoot() {
+		if(timeSinceLastFire < RATE_OF_FIRE || flickering) {
+			return;
+		}
+		timeSinceLastFire = 0;
+		fire(this.angle);
+		firePlayer.play();
+	}
+	public void multiShot() {
+		if(timeSinceLastFire < RATE_OF_FIRE || flickering) {
+			return;
+		}
+		timeSinceLastFire = 0;
+		fire(this.angle - (Math.PI / 16));
+		fire(this.angle + (Math.PI / 16));
+		fire(this.angle);
+		firePlayer.play();
+	}
+	public void spray() {
+		if(timeSinceLastFire < RATE_OF_FIRE || flickering) {
+			return;
+		}
+		timeSinceLastFire = 0;
+		for(int i = 0; i < sprayCount; i++) {
+			fire(this.angle + i*(2*Math.PI / sprayCount));
+		}
+		firePlayer.play();
+	}
+	public void draw(Graphics g) {
+		if(isActive & hitFlicker % 5 != 3) {
+			g.setColor(Color.RED);
+			g.fillRect((int)xLocation, (int)yLocation - 20, 40, 8);
+			g.setColor(Color.GREEN);
+			g.fillRect((int)xLocation, (int)yLocation - 20, (int)(40 * ((double)health / MAX_HEALTH)), 8);
+			super.draw(g);
+			if(engineOn) {
+				drawFlames(g);
+			}
+			else {
+				flameRow = 0;
+				flameCounter = 0;
+			}
+		}
+		for(Bullet bullet: bulletList) {
+			bullet.draw(g);
+		}	
+	}
+	public void drawFlames(Graphics g) {
+		Graphics2D g2d = (Graphics2D)g;
+		AffineTransform currentTransform = g2d.getTransform();
+		AffineTransform newTransform = new AffineTransform();
+		newTransform.translate(xLocation + centerX, yLocation + centerY);
+		newTransform.rotate(angle);
+		newTransform.translate(-xLocation - centerX, -yLocation - centerY);
+		g2d.setTransform(newTransform);
+		
+		
+		/*
+		 * Actual flame drawing code here!!!!
+		 */
+		if(flameRow == 0) {
+			g2d.setColor(Color.RED);
+			for(int i = 0; i < 7; i++) {
+				int flameX = (int)xLocation + i*6;
+				int flameY = (int)yLocation;
+				if(i == 0 || i == 6) {
+					flameY += 53;
+				}
+				else if(i == 1 || i == 5) {
+					flameY += 48;
+				}
+				else if(i == 2 || i == 4) {
+					flameY += 43;
+				}
+				else {
+					flameY += 38;
+				}
+				g.fillOval(flameX, flameY, FLAME_WIDTH, FLAME_HEIGHT);
+			}
+		}
+		else if(flameRow == 1) {
+			g2d.setColor(Color.ORANGE);
+			for(int i = 0; i < 5; i++) {
+				int flameX = (int)xLocation + i*6 + 6;
+				int flameY = (int)yLocation  + 5;
+				if(i == 0 || i == 4) {
+					flameY += 53;
+				}
+				else if(i == 1 || i == 3) {
+					flameY += 48;
+				}
+				else {
+					flameY += 43;
+				}
+				g.fillOval(flameX, flameY, FLAME_WIDTH, FLAME_HEIGHT);
+			}
+		}
+		else if(flameRow == 2) {
+			g2d.setColor(Color.YELLOW);
+			for(int i = 0; i < 3; i++) {
+				int flameX = (int)xLocation + i*6 + 12;
+				int flameY = (int)yLocation  + 10;
+				if(i == 0 || i == 2) {
+					flameY += 53;
+				}
+				
+				else {
+					flameY += 48;
+				}
+				g.fillOval(flameX, flameY, FLAME_WIDTH, FLAME_HEIGHT);
+			}
+		}
+		else {
+			g2d.setColor(Color.YELLOW);
+			g2d.fillOval((int)xLocation + 18, (int)yLocation + 68, FLAME_WIDTH, FLAME_HEIGHT);
+		}
+		flameCounter++;
+		if(flameCounter > FLAME_DELAY) {
+			flameCounter = 0;
+			flameRow++;
+			flameRow = flameRow % 4;
+		}
+		g2d.setTransform(currentTransform);
+	}
+	
+	public boolean hitAsteroid(VectorSprite rock) {
+		for(int i = 0; i < rock.drawShape.npoints; i++) {
+			if(drawShape.contains(rock.drawShape.xpoints[i],rock.drawShape.ypoints[i])) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
